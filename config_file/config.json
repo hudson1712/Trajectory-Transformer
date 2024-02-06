@@ -14,7 +14,7 @@
   "n_head": 2,
   "n_inner": null,
   "n_layer": 1,
-  "n_positions": 128,
+  "n_positions": 144,
   "reorder_and_upcast_attn": false,
   "resid_pdrop": 0.1,
   "scale_attn_by_inverse_layer_idx": false,

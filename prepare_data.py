@@ -285,6 +285,10 @@ def create_trajectories(data, window_size=10):
     return trajectories
 
 def create_sequences(data, sequence_length=48):
+    """
+    Create sequences from the input data with optional parameters for sequence length. 
+    Returns sequences and masks as numpy arrays.
+    """
     state_columns = [col for col in data.columns if col not in ('Unnamed: 0', 'campaign_name', 'adset_datetime', 'action_budget_change', 'reward_profit')]
     action_column = 'action_budget_change'
     returns_to_go = 'returns_to_go'
@@ -325,6 +329,10 @@ def create_sequences(data, sequence_length=48):
     return np.array(sequences), np.array(masks)
 
 def create_trajectories_file():
+    """
+    Calculate the states actions and rewards for the transformer model.
+    Create trajectories file from the given data and save the sequences to a CSV file and the trajectories to a pickle file.
+    """
     #data = pd.read_csv('ash_0712-2901__.csv', index_col=0)
     data = pd.read_csv('data/ash_0712-2901__.csv', index_col=0)
     
