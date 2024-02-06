@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from typing import Optional
 from torch import Tensor
-from api_requests import load_database_table
+#from api_requests import load_database_table
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
@@ -326,7 +326,7 @@ def create_sequences(data, sequence_length=48):
 
 def create_trajectories_file():
     #data = pd.read_csv('ash_0712-2901__.csv', index_col=0)
-    data = pd.read_csv('ash_0712-2901__ copy.csv', index_col=0)
+    data = pd.read_csv('data/ash_0712-2901__.csv', index_col=0)
     
     state_columns = [col for col in data.columns if col not in ('Unnamed: 0', 'campaign_name', 'adset_datetime', 'action_budget_change', 'reward_profit')]
     action_column = 'action_budget_change'
@@ -345,18 +345,18 @@ def create_trajectories_file():
     data['adset_datetime'] = pd.to_datetime(data['adset_datetime'], unit='s')  # Assuming 'adset_datetime' is a UNIX timestamp
     #grouped_data = data.groupby('campaign_name').apply(lambda x: x.sort_values('adset_datetime'))
 
-    sequences, masks = create_sequences(data, 48)
+    sequences, masks = create_sequences(data, sequence_length=240)
     
     print(sequences)
     #Save the sequences to a csv file
-    with open('sequences.csv', 'w') as f:
+    with open('data/sequences_240.csv', 'w') as f:
         for sequence in sequences:
             np.savetxt(f, sequence, delimiter=',')
 
     #Save trajectories to a file then import
-    with open('trajectories.pkl', 'wb') as f:
+    with open('data/trajectories_240.pkl', 'wb') as f:
         pickle.dump(sequences, f)
-    with open('masks.pkl', 'wb') as f:
+    with open('data/masks_240.pkl', 'wb') as f:
         pickle.dump(masks, f)
 
 #prep_data('ash_0712-2901.csv', 'ash_0712-2901__.csv')
