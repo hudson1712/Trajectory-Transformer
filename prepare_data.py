@@ -98,28 +98,34 @@ def get_dataframe(filename, savepath, sequence_length=48):
         
     return df
 
-def prep_data(filename, savepath):
+def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variables=0):
+    """
+    Prepare the data for training by concatenating the hourly data with the hourly conversions and then normmalising/scaling data.
+    Creates columns for actions (% Budget change from previous step) and the rewards (absolute profit).
 
+    Inputs:
+        df: dataframe containing hourly data, joined with budget table from SQL database
+        cdf: dataframe containing hourly cumulative conversions
+    Outputs:
+        df: dataframe containing all the data normalised and ready for sequencing
+    """
     #Process conversions
-    cdf = pd.read_csv('conversions-3001.csv')
     cdf['adset_datetime'] = pd.to_datetime(cdf['hour'])
-    # cdf.groupby(['campaign_name','adset_datetime'])
-    # for campaign in cdf['campaign_name'].unique():
-    #     cdf.loc[cdf['campaign_name'] == campaign, 'hourly_conversions'] = cdf.loc[cdf['campaign_name'] == campaign, 'conversions'].diff()
-    #     #if at 00:00:00 set hourly conversions to conversions
-    #     cdf.loc[cdf['adset_datetime'].dt.hour == 0, 'hourly_conversions'] = cdf.loc[cdf['adset_datetime'].dt.hour == 0, 'conversions']
+    cdf.groupby(['campaign_name','adset_datetime'])
+    for campaign in cdf['campaign_name'].unique():
+        cdf.loc[cdf['campaign_name'] == campaign, 'hourly_conversions'] = cdf.loc[cdf['campaign_name'] == campaign, 'conversions'].diff()
+        #if at 00:00:00 set hourly conversions to conversions
+        cdf.loc[cdf['adset_datetime'].dt.hour == 0, 'hourly_conversions'] = cdf.loc[cdf['adset_datetime'].dt.hour == 0, 'conversions']
 
-    # #Replace NaN and negative values in the hourly conversions with 0
-    # cdf['hourly_conversions'].fillna(0, inplace=True)
-    # cdf['hourly_conversions'] = cdf['hourly_conversions'].apply(lambda x: 0 if x < 0 else x)
-    # cdf.to_csv('conversions-3001.csv', index=False)
+    #Replace NaN and negative values in the hourly conversions with 0
+    cdf['hourly_conversions'].fillna(0, inplace=True)
+    cdf['hourly_conversions'] = cdf['hourly_conversions'].apply(lambda x: 0 if x < 0 else x)
+    cdf.to_csv(conversions_savepath, index=False)
 
     pd.set_option('display.max_rows', 1000)
     pd.set_option('display.max_columns', None)
     #print(cdf.groupby(['campaign_name','adset_datetime'])['hourly_conversions'].sum())
 
-    #Process hourly data
-    df = pd.read_csv(filename)
     #Drop na values in the campaign name
     df.dropna(subset=['campaign_name'], inplace=True)
     df = df[~df['campaign_name'].str.contains('-A12|test', regex=True)]
@@ -148,27 +154,26 @@ def prep_data(filename, savepath):
     df['month_cos'] = np.cos(df['adset_datetime'] * (2. * np.pi / year))
     df['month_sin'] = np.sin(df['adset_datetime'] * (2. * np.pi / year))
 
-    # Transform revenue by log_10 and divide by 10
-    transformed_revenue = np.log10(df['impressions']+1) / 10
-
     df['CTR'] = df['ay_sessions'] / df['impressions']
     df['CPM'] = df['spend'] / df['impressions']
     df['RPS'] = df['revenue'] / df['ay_sessions']
+
     #Replace all inf and NaN with 0
     df.replace([np.inf, -np.inf], 0, inplace=True)
     df.fillna(0, inplace=True)
+
     #Normalise the above columns
     df['CTR'] = (df['CTR'] - df['CTR'].mean()) / df['CTR'].std()
     df['CPM'] = (df['CPM'] - df['CPM'].mean()) / df['CPM'].std()
     df['RPS'] = (df['RPS'] - df['RPS'].mean()) / df['RPS'].std()
     
-    #From each campaign_name, extract the RPS event, the country code (US, GB or CA), the domain (EK, GS, SM or HH)
-    # Extracting RPS event, country code, and domain from campaign_name
+    #From each campaign_name, extract the RPS event, the country code (US, GB or CA), the domain (EK, GS, SM or HH) and the device (if not AND then iOS)
     df['event'] = df['campaign_name'].str.extract(r'(RPS\d+)')
     df['country'] = df['campaign_name'].str.extract(r'(-US|-CA)')
     df['domain'] = df['campaign_name'].str.extract(r'(-EK|-GS|-SM|-HH)')
     df['device'] = df['campaign_name'].str.extract(r'(-AND)')
-    #set paused if spend is 0
+
+    #if spend is 0 set the active flag to 0
     df['active'] = df['spend'].apply(lambda x: 0 if x == 0 else 1)
 
     #Encode the above categorical features
@@ -177,7 +182,7 @@ def prep_data(filename, savepath):
     df = df.replace({True: 1, False: 0})
     print(df)
 
-    # log transform the numerical features
+    #log transform the numerical features and scale by 10 to bring into range 0,1 (No variables should be greater than ~10^5)
     df['budget'] = np.log10(df['budget']/100+1) / 10
     df['revenue'] = np.log10(df['revenue']+1) / 10
     df['spend'] = np.log10(df['spend']+1) / 10
@@ -187,23 +192,16 @@ def prep_data(filename, savepath):
     df['hourly_conversions'] = np.log10(df['hourly_conversions']+1) / 10
 
     #create a violin plot of the above metrics
-    plt.figure(figsize=(10, 6))
-    sns.violinplot(data=df[['revenue', 'spend', 'impressions', 'ay_sessions', 'ay_pageviews', 'hourly_conversions', 'CTR', 'CPM', 'RPS']])
-    plt.xlabel('Metrics')
-    plt.ylabel('Values')
-    plt.ylim(-2,2)
-    plt.title('Violin Plot of Metrics')
-    plt.show()
+    if display_variables:
+        plt.figure(figsize=(10, 6))
+        sns.violinplot(data=df[['budget', 'action_budget_change', 'reward_profit', 'revenue', 'spend', 'impressions', 'ay_sessions', 'ay_pageviews', 'hourly_conversions', 'CTR', 'CPM', 'RPS']])
+        plt.xlabel('Metrics')
+        plt.ylabel('Values')
+        plt.ylim(-2,2)
+        plt.title('Violin Plot of Metrics')
+        plt.show()
 
-    # # Plot the distribution of transformed revenue
-    # plt.hist(transformed_revenue, bins=20)
-    # plt.xlabel('Transformed Revenue')
-    # plt.ylabel('Frequency')
-    # plt.title('Distribution of Transformed Revenue')
-    # plt.show()
-
-    #print(df)
-
+    #Define the order of state variables and action variables with associated aggregation methods
     agg_dict = {
         'event_RPS3': 'first',
         'event_RPS5': 'first',
@@ -235,59 +233,20 @@ def prep_data(filename, savepath):
         'month_cos': 'mean',
         'month_sin': 'mean'
     }
+    
+    #Group by campaign_name and adset_datetime and aggregate the above metrics
     df = df.groupby(['campaign_name','adset_datetime']).agg(agg_dict).reset_index()
     #save the data
     df.to_csv(savepath)
     return df
 
-def create_trajectories(data, window_size=10):
-    """
-    Create trajectories for the trajectory transformer.
-    Parameters:
-    - data: pd.DataFrame, the input data.
-    - window_size: int, the size of the window to create trajectories.
-    Returns:
-    - trajectories: list, a list of trajectories, where each trajectory is a tuple (states, actions, rewards).
-    """
-    trajectories = []
-
-    # Sort and group the data by campaign
-    data = data.sort_values(['campaign_name', 'adset_datetime'])
-    grouped_data = data.groupby('campaign_name')
-
-    # Iterate over each campaign
-    for name, group in grouped_data:
-        # Iterate over windows of data within each campaign
-        for start_idx in range(len(group) - window_size + 1):
-            # Extract the window
-            window = group.iloc[start_idx:start_idx + window_size]
-            
-            # Extract states (assuming all other columns are part of the state)
-            states = window.drop(columns=['campaign_name', 'adset_datetime', 'active'])
-
-            #Compute the action as the ratio of the budget to the previous step
-
-            rewards = (np.power(10, 10*window['revenue'].values)-1) * (np.power(10, -10*window['spend'].values)-1)
-            returns_to_go = np.flip(np.cumsum(np.flip(rewards)))
-            positions = np.arange(window_size)
-
-            if len(states) < window_size:
-                pad_length = window_size - len(states)
-                states = pd.concat([states, pd.DataFrame(np.zeros((pad_length, len(states.columns))), columns=states.columns)])
-                actions = np.concatenate([actions, np.zeros(pad_length)])
-                rewards = np.concatenate([rewards, np.zeros(pad_length)])
-                returns_to_go = np.concatenate([returns_to_go, np.zeros(pad_length)])
-                positions = np.arange(window_size)
-
-            # Append the trajectory (states, actions, rewards) to the list
-            trajectories.append((states, actions, rewards, returns_to_go, positions))
-
-    return trajectories
-
 def create_sequences(data, sequence_length=48):
     """
     Create sequences from the input data with optional parameters for sequence length. 
     Returns sequences and masks as numpy arrays.
+
+    Input: dataframe with columns: campaign_name, adset_datetime, [--states--], action_budget_change, reward_profit
+    Output: numpy arrays of sequences and masks
     """
     state_columns = [col for col in data.columns if col not in ('Unnamed: 0', 'campaign_name', 'adset_datetime', 'action_budget_change', 'reward_profit')]
     action_column = 'action_budget_change'
@@ -296,8 +255,8 @@ def create_sequences(data, sequence_length=48):
     sequences = []
     masks = []
     for _, group in data.groupby('campaign_name'):
-        # Extract states, actions, and campaign names
-        states_actions = group[state_columns + [action_column, reward_column]].values
+        # Extract states, actions and rewards
+        states_actions_rewards = group[state_columns + [action_column, reward_column]].values
 
         #Exclude short sequences from the training data
         if len(group) < 5:
@@ -305,30 +264,29 @@ def create_sequences(data, sequence_length=48):
 
         returns_to_go = np.flip(np.cumsum(np.flip(group[reward_column].values)))
         #Append the returns to go to the states and actions
-        states_actions = np.concatenate((states_actions, returns_to_go.reshape(-1, 1)), axis=1)
+        df = np.concatenate((states_actions_rewards, returns_to_go.reshape(-1, 1)), axis=1)
         
-        # If the campaign is shorter than the sequence length, pad it
+        # If the campaign is shorter than the sequence length, pad it and provide a mask
         if len(group) < sequence_length:
             # Pad the states and actions
             pad_length = sequence_length - len(group)
-            states_actions_padded = np.pad(states_actions, ((0, pad_length), (0, 0)), 'constant', constant_values=0)
+            df_padded = np.pad(df, ((0, pad_length), (0, 0)), 'constant', constant_values=0)
 
             # Create the mask
             mask = [1] * len(group) + [0] * pad_length  # 1 for actual data, 0 for padding
-            sequences.append(states_actions_padded)
+            sequences.append(df_padded)
             masks.append(mask)
             continue
         
-        # If the campaign is longer than the sequence length, create overlapping sequences
+        # If the campaign is longer than the sequence length, create overlapping sequences with full masks
         for start_idx in range(0, len(group) - sequence_length + 1):
             end_idx = start_idx + sequence_length
-            sequences.append(states_actions[start_idx:end_idx])
+            sequences.append(df[start_idx:end_idx])
             masks.append([1] * sequence_length)
-            
-            
+
     return np.array(sequences), np.array(masks)
 
-def create_trajectories_file():
+def create_trajectories_file(hourly_data=None, conversions_data=None, savepath_id='1'):
     """
     Calculate the states actions and rewards for the transformer model.
     Create trajectories file from the given data and save the sequences to a CSV file and the trajectories to a pickle file.
@@ -357,15 +315,12 @@ def create_trajectories_file():
     
     print(sequences)
     #Save the sequences to a csv file
-    with open('data/sequences_240.csv', 'w') as f:
+    with open('data/sequences_'+savepath_id+'.csv', 'w') as f:
         for sequence in sequences:
             np.savetxt(f, sequence, delimiter=',')
 
     #Save trajectories to a file then import
-    with open('data/trajectories_240.pkl', 'wb') as f:
+    with open('data/trajectories_'+savepath_id+'.pkl', 'wb') as f:
         pickle.dump(sequences, f)
-    with open('data/masks_240.pkl', 'wb') as f:
+    with open('data/masks_'+savepath_id+'.pkl', 'wb') as f:
         pickle.dump(masks, f)
-
-#prep_data('ash_0712-2901.csv', 'ash_0712-2901__.csv')
-create_trajectories_file()

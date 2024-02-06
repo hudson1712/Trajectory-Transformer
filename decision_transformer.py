@@ -8,7 +8,7 @@ from torch.utils.data import TensorDataset
 import pickle
 from transformers import DecisionTransformerConfig, DecisionTransformerModel
 import json
-import utils
+import utilities
 import uuid
 
 #configuration = DecisionTransformerConfig()
@@ -28,8 +28,8 @@ num_heads = 2 # number of attention heads
 num_layers = 1 # number of transformer layers
 
 # Define Training parameters
-num_epochs = 10 # training epochs
-batch_size = 256 # number of trajectories per batch
+num_epochs = 100 # training epochs
+batch_size = 128 # number of trajectories per batch
 early_stopping = 1 # set to 1 if you want to stop training when the validation loss stops improving
 
 #Adjust the configuration
@@ -50,7 +50,7 @@ with open('data/masks_48.pkl', 'rb') as f:
 
 #Define Model and Optimiser 
 model = DecisionTransformerModel(decision_transformer_config).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=5e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=10e-3)
 
 print(trajectories.shape, masks.shape)
 
@@ -73,11 +73,6 @@ for states, actions, rewards, returns_to_go, timesteps, att_mask in data_loader:
 #Define loss function
 loss_function = nn.MSELoss()
 
-training_losses = []
-best_loss = 0
-
 #Train the model
-best_model = utils.train_trajectory_transformer(model, optimizer, data_loader, loss_function, num_epochs)
+best_model = utilities.train_trajectory_transformer(model, optimizer, data_loader, loss_function, num_epochs)
 torch.save(best_model.state_dict(), 'models/best_model_current.pt')
-# training_losses_df = pd.DataFrame({'training_loss': training_losses})
-# training_losses_df.to_csv('loss/training_loss-'+model_id+'.csv')
