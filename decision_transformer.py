@@ -13,6 +13,7 @@ import uuid
 
 #configuration = DecisionTransformerConfig()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+evaluation_mode = False
 
 # Read config from json config_file/config.json and convert to decision transformer config
 config_file_path = 'config_file/config.json'
@@ -24,12 +25,12 @@ state_dim = 27  # depends on your specific environment
 action_dim = 1  # depends on your specific environment
 max_length = 48  # maximum sequence length/context size
 hidden_size = 64 # dimension of the hidden embeddings, quadratic in model parameter size
-num_heads = 2 # number of attention heads
-num_layers = 1 # number of transformer layers
+num_heads = 4 # number of attention heads
+num_layers = 2 # number of transformer layers
 
 # Define Training parameters
 num_epochs = 100 # training epochs
-batch_size = 128 # number of trajectories per batch
+batch_size = 64 # number of trajectories per batch
 early_stopping = 1 # set to 1 if you want to stop training when the validation loss stops improving
 
 #Adjust the configuration
@@ -39,18 +40,18 @@ config['max_ep_len'] = max_length
 config['hidden_size'] = hidden_size
 config['n_layer'] = num_layers
 config['n_head'] = num_heads
-config['n_positions'] = 3*max_length
+config['n_positions'] = 3*max_length*2 #minimum number of positions, can be extended for larger contexts
+
+#Save config file
+with open('config_file/config.json', 'w') as f:
+    json.dump(config, f)
 
 decision_transformer_config = DecisionTransformerConfig(**config)
 
-with open('data/trajectories_48.pkl', 'rb') as f:
+with open('data/trajectories_dec-jan.pkl', 'rb') as f:
     trajectories = pickle.load(f)
-with open('data/masks_48.pkl', 'rb') as f:
+with open('data/masks_dec-jan.pkl', 'rb') as f:
     masks = pickle.load(f)
-
-#Define Model and Optimiser 
-model = DecisionTransformerModel(decision_transformer_config).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=10e-3)
 
 print(trajectories.shape, masks.shape)
 
@@ -62,17 +63,35 @@ returns_to_go = torch.tensor(trajectories[:, :, -1], dtype=torch.float32).unsque
 attention_mask = torch.tensor(masks[:, :], dtype=torch.float32).to(device) # mask for padding
 timesteps = torch.arange(max_length).unsqueeze(0).repeat(trajectories.shape[0], 1).to(device) # time steps for each trajectory
 
-#Create a dataloader for batching the data
-data_loader = DataLoader(TensorDataset(states, actions, rewards, returns_to_go, timesteps, attention_mask), batch_size=batch_size, shuffle=True)
+if not evaluation_mode:
+    #Define Model and Optimiser 
+    model = DecisionTransformerModel(decision_transformer_config).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
 
-#Test by getting an element of the dataloader
-for states, actions, rewards, returns_to_go, timesteps, att_mask in data_loader:
-    print(states.shape, actions.shape, rewards.shape, returns_to_go.shape, att_mask.shape)
-    break
+    #Create a dataloader for batching the data
+    train_loader = DataLoader(TensorDataset(states, actions, rewards, returns_to_go, timesteps, attention_mask), batch_size=batch_size, shuffle=True)
 
-#Define loss function
-loss_function = nn.MSELoss()
+    #Define loss function
+    loss_function = nn.MSELoss()
 
-#Train the model
-best_model = utilities.train_trajectory_transformer(model, optimizer, data_loader, loss_function, num_epochs)
-torch.save(best_model.state_dict(), 'models/best_model_current.pt')
+    #Test by getting an element of the dataloader
+    for states, actions, rewards, returns_to_go, timesteps, att_mask in train_loader:
+        print(states.shape, actions.shape, rewards.shape, returns_to_go.shape, att_mask.shape)
+        break
+
+    #Train the model
+    best_model = utilities.train_trajectory_transformer(model, optimizer, train_loader, loss_function, num_epochs)
+    torch.save(best_model.state_dict(), 'models/best_model_current.pt')
+
+if evaluation_mode:
+    #Load the best model
+    model = DecisionTransformerModel(decision_transformer_config).to(device)
+    model.load_state_dict(torch.load('models/best_model_current.pt'))
+
+    #Build a train loader for evaluation
+    train_loader = DataLoader(TensorDataset(states, actions, rewards, returns_to_go, timesteps, attention_mask), batch_size=1, shuffle=False)
+
+    #Evaluate the model
+    state, action, reward = utilities.evaluate_trajectory_transformer(model, train_loader, target_return = -10e3)
+
+    print(state, action, reward)

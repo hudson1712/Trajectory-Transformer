@@ -52,7 +52,7 @@ def train_trajectory_transformer(model, optimizer, train_loader, loss_function, 
     print(f'Best loss: {best_loss} in epoch {training_losses.index(best_loss)}')
     return best_model
 
-def evaluate_trajectory_transformer(model, test_loader, loss_function, target_return = 10e6):
+def evaluate_trajectory_transformer(model, test_loader, target_return = 10e6):
     
     # R , s , a , t , done = [ target_return ] , [ env . reset ()] , [] , [1] , False
     # while not done : # autoregressive generation / sampling
@@ -67,15 +67,22 @@ def evaluate_trajectory_transformer(model, test_loader, loss_function, target_re
     # Implement the above psuedocode from the paper:
     model.eval()
     with torch.no_grad():
-        rewards, state, action, timestep = [target_return], [], [], [1]
+        for states, actions, rewards, returns_to_go, timesteps, att_mask in test_loader:
+            #Adjust the mask to be all ones
+            #att_mask = torch.ones_like(att_mask)
 
-        state_preds, action_preds, return_preds = model(
-                states=states, 
-                actions=actions, 
-                rewards=rewards,
-                returns_to_go=returns_to_go, 
-                timesteps=timesteps, 
-                attention_mask=att_mask,
-                return_dict = False
-            )
+            #Add the target return to every element of the rewards to go
+            returns_to_go = returns_to_go + target_return
+            print(returns_to_go)
 
+            state_preds, action_preds, return_preds = model(
+                    states=states, 
+                    actions=actions, 
+                    rewards=rewards,
+                    returns_to_go=returns_to_go,
+                    timesteps=timesteps, 
+                    attention_mask=att_mask,
+                    return_dict = False
+                )
+
+    return state_preds, action_preds, return_preds

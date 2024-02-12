@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 from typing import Optional
 from torch import Tensor
-#from api_requests import load_database_table
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
@@ -98,7 +97,7 @@ def get_dataframe(filename, savepath, sequence_length=48):
         
     return df
 
-def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variables=0):
+def prep_data(df, cdf, conversions_savepath=None, savepath=None, description_path='', display_variables=0):
     """
     Prepare the data for training by concatenating the hourly data with the hourly conversions and then normmalising/scaling data.
     Creates columns for actions (% Budget change from previous step) and the rewards (absolute profit).
@@ -138,10 +137,11 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variabl
     df['action_budget_change'] = df.groupby('campaign_name')['budget'].transform(lambda x: x.pct_change().fillna(0))
     #Shift the action_budget_change back by 1 hour and fill with 0 for na
     df['action_budget_change'] = df.groupby('campaign_name')['action_budget_change'].transform(lambda x: x.shift(-1).fillna(0))
-    df['reward_profit'] = df['revenue'] - df['spend']
+    #df['reward_profit'] = df['revenue'] - df['spend']
 
     # Convert adset_datetime to numerical timestamp integer in nanoseconds
-    df['adset_datetime'] = pd.to_datetime(df['adset_datetime'].astype(str).str[:-2], format='%Y-%m-%d %H:%M:%S')
+    #df['adset_datetime'] = pd.to_datetime(df['adset_datetime'].astype(str).str[:-2], format='%Y-%m-%d %H:%M:%S')
+    df['adset_datetime'] = pd.to_datetime(df['adset_datetime'].astype(str), format='%Y-%m-%d %H:%M:%S')
     df = df.merge(cdf, how='left', on=['adset_datetime','campaign_name'])
     df['adset_datetime'] = df['adset_datetime'].astype(np.int64) // 10**9
 
@@ -154,6 +154,7 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variabl
     df['month_cos'] = np.cos(df['adset_datetime'] * (2. * np.pi / year))
     df['month_sin'] = np.sin(df['adset_datetime'] * (2. * np.pi / year))
 
+    #Compute additional metrics
     df['CTR'] = df['ay_sessions'] / df['impressions']
     df['CPM'] = df['spend'] / df['impressions']
     df['RPS'] = df['revenue'] / df['ay_sessions']
@@ -162,11 +163,6 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variabl
     df.replace([np.inf, -np.inf], 0, inplace=True)
     df.fillna(0, inplace=True)
 
-    #Normalise the above columns
-    df['CTR'] = (df['CTR'] - df['CTR'].mean()) / df['CTR'].std()
-    df['CPM'] = (df['CPM'] - df['CPM'].mean()) / df['CPM'].std()
-    df['RPS'] = (df['RPS'] - df['RPS'].mean()) / df['RPS'].std()
-    
     #From each campaign_name, extract the RPS event, the country code (US, GB or CA), the domain (EK, GS, SM or HH) and the device (if not AND then iOS)
     df['event'] = df['campaign_name'].str.extract(r'(RPS\d+)')
     df['country'] = df['campaign_name'].str.extract(r'(-US|-CA)')
@@ -180,7 +176,7 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variabl
     df = pd.get_dummies(df, columns=['event', 'country', 'domain', 'device'])
     #Convert all boolean columns to 0 and 1
     df = df.replace({True: 1, False: 0})
-    print(df)
+    #print(df)
 
     #log transform the numerical features and scale by 10 to bring into range 0,1 (No variables should be greater than ~10^5)
     df['budget'] = np.log10(df['budget']/100+1) / 10
@@ -190,6 +186,12 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variabl
     df['ay_sessions'] = np.log10(df['ay_sessions']+1) / 10
     df['ay_pageviews'] = np.log10(df['ay_pageviews']+1) / 10
     df['hourly_conversions'] = np.log10(df['hourly_conversions']+1) / 10
+    df['reward_profit'] = df['revenue'] - df['spend']
+
+    #Normalise the above columns
+    df['CTR'] = (df['CTR'] - df['CTR'].mean()) / df['CTR'].std()
+    df['CPM'] = (df['CPM'] - df['CPM'].mean()) / df['CPM'].std()
+    df['RPS'] = (df['RPS'] - df['RPS'].mean()) / df['RPS'].std()
 
     #create a violin plot of the above metrics
     if display_variables:
@@ -200,6 +202,11 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variabl
         plt.ylim(-2,2)
         plt.title('Violin Plot of Metrics')
         plt.show()
+
+    #Ensure all categorical columns are present, creating them if not
+    for col in ['event_RPS3', 'event_RPS5', 'event_RPS8', 'country_-US', 'country_-CA', 'domain_-EK', 'domain_-GS', 'domain_-SM', 'domain_-HH', 'device_-AND']:
+        if col not in df.columns:
+            df[col] = 0
 
     #Define the order of state variables and action variables with associated aggregation methods
     agg_dict = {
@@ -233,6 +240,9 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, display_variabl
         'month_cos': 'mean',
         'month_sin': 'mean'
     }
+
+    #Save the data.describe to a csv for normalisation constants
+    df.describe().to_csv('data/'+description_path+'.csv')
     
     #Group by campaign_name and adset_datetime and aggregate the above metrics
     df = df.groupby(['campaign_name','adset_datetime']).agg(agg_dict).reset_index()
@@ -286,13 +296,14 @@ def create_sequences(data, sequence_length=48):
 
     return np.array(sequences), np.array(masks)
 
-def create_trajectories_file(hourly_data=None, conversions_data=None, savepath_id='1'):
+def create_trajectories_file(hourly_data, conversions_data, savepath_id='1', sequence_length=48, to_csv=False):
     """
     Calculate the states actions and rewards for the transformer model.
     Create trajectories file from the given data and save the sequences to a CSV file and the trajectories to a pickle file.
     """
     #data = pd.read_csv('ash_0712-2901__.csv', index_col=0)
-    data = pd.read_csv('data/ash_0712-2901__.csv', index_col=0)
+    #data = pd.read_csv('data/ash_0712-2901__.csv', index_col=0)
+    data = prep_data(hourly_data, conversions_data, display_variables=True)
     
     state_columns = [col for col in data.columns if col not in ('Unnamed: 0', 'campaign_name', 'adset_datetime', 'action_budget_change', 'reward_profit')]
     action_column = 'action_budget_change'
@@ -311,16 +322,19 @@ def create_trajectories_file(hourly_data=None, conversions_data=None, savepath_i
     data['adset_datetime'] = pd.to_datetime(data['adset_datetime'], unit='s')  # Assuming 'adset_datetime' is a UNIX timestamp
     #grouped_data = data.groupby('campaign_name').apply(lambda x: x.sort_values('adset_datetime'))
 
-    sequences, masks = create_sequences(data, sequence_length=240)
+    sequences, masks = create_sequences(data, sequence_length=sequence_length)
     
-    print(sequences)
+    #print(sequences)
     #Save the sequences to a csv file
-    with open('data/sequences_'+savepath_id+'.csv', 'w') as f:
-        for sequence in sequences:
-            np.savetxt(f, sequence, delimiter=',')
+    if to_csv:
+        with open('data/sequences_'+savepath_id+'.csv', 'w') as f:
+            for sequence in sequences:
+                np.savetxt(f, sequence, delimiter=',')
 
     #Save trajectories to a file then import
     with open('data/trajectories_'+savepath_id+'.pkl', 'wb') as f:
         pickle.dump(sequences, f)
     with open('data/masks_'+savepath_id+'.pkl', 'wb') as f:
         pickle.dump(masks, f)
+
+    return sequences, masks
