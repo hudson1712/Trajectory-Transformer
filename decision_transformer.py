@@ -13,7 +13,7 @@ import uuid
 
 #configuration = DecisionTransformerConfig()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-evaluation_mode = False
+evaluation_mode = True
 
 # Read config from json config_file/config.json and convert to decision transformer config
 config_file_path = 'config_file/config.json'
@@ -21,16 +21,16 @@ with open(config_file_path, 'r') as f:
     config = json.load(f)
 
 # Define Model and Data parameters
-state_dim = 27  # depends on your specific environment
+state_dim = 29  # depends on your specific environment
 action_dim = 1  # depends on your specific environment
 max_length = 48  # maximum sequence length/context size
 hidden_size = 64 # dimension of the hidden embeddings, quadratic in model parameter size
-num_heads = 4 # number of attention heads
+num_heads = 2 # number of attention heads
 num_layers = 2 # number of transformer layers
 
 # Define Training parameters
 num_epochs = 100 # training epochs
-batch_size = 64 # number of trajectories per batch
+batch_size = 128 # number of trajectories per batch
 early_stopping = 1 # set to 1 if you want to stop training when the validation loss stops improving
 
 #Adjust the configuration
@@ -48,9 +48,12 @@ with open('config_file/config.json', 'w') as f:
 
 decision_transformer_config = DecisionTransformerConfig(**config)
 
-with open('data/trajectories_dec-jan.pkl', 'rb') as f:
+data_suffix = 'RockHoFNope03B'
+#data_suffix = 'dec-jan'
+
+with open('data/trajectories_'+data_suffix+'.pkl', 'rb') as f:
     trajectories = pickle.load(f)
-with open('data/masks_dec-jan.pkl', 'rb') as f:
+with open('data/masks_'+data_suffix+'.pkl', 'rb') as f:
     masks = pickle.load(f)
 
 print(trajectories.shape, masks.shape)
@@ -86,12 +89,12 @@ if not evaluation_mode:
 if evaluation_mode:
     #Load the best model
     model = DecisionTransformerModel(decision_transformer_config).to(device)
-    model.load_state_dict(torch.load('models/best_model_current.pt'))
+    model.load_state_dict(torch.load('models/model-2_layer_standardised_b=128.pt'))
 
     #Build a train loader for evaluation
     train_loader = DataLoader(TensorDataset(states, actions, rewards, returns_to_go, timesteps, attention_mask), batch_size=1, shuffle=False)
 
     #Evaluate the model
-    state, action, reward = utilities.evaluate_trajectory_transformer(model, train_loader, target_return = -10e3)
+    state, action, reward = utilities.evaluate_trajectory_transformer(model, train_loader, target_return = -2)
 
     print(state, action, reward)

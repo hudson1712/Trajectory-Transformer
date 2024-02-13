@@ -115,10 +115,11 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, description_pat
         cdf.loc[cdf['campaign_name'] == campaign, 'hourly_conversions'] = cdf.loc[cdf['campaign_name'] == campaign, 'conversions'].diff()
         #if at 00:00:00 set hourly conversions to conversions
         cdf.loc[cdf['adset_datetime'].dt.hour == 0, 'hourly_conversions'] = cdf.loc[cdf['adset_datetime'].dt.hour == 0, 'conversions']
+        #Replace NaN and negative values in the hourly conversions with 0
+        cdf['hourly_conversions'].fillna(0, inplace=True)
+        cdf['hourly_conversions'] = cdf['hourly_conversions'].apply(lambda x: 0 if x < 0 else x)
+        cdf.loc[cdf['campaign_name'] == campaign, 'cum_conversions'] = cdf.loc[cdf['campaign_name'] == campaign, 'hourly_conversions'].cumsum()
 
-    #Replace NaN and negative values in the hourly conversions with 0
-    cdf['hourly_conversions'].fillna(0, inplace=True)
-    cdf['hourly_conversions'] = cdf['hourly_conversions'].apply(lambda x: 0 if x < 0 else x)
     cdf.to_csv(conversions_savepath, index=False)
 
     pd.set_option('display.max_rows', 1000)
@@ -137,7 +138,7 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, description_pat
     df['action_budget_change'] = df.groupby('campaign_name')['budget'].transform(lambda x: x.pct_change().fillna(0))
     #Shift the action_budget_change back by 1 hour and fill with 0 for na
     df['action_budget_change'] = df.groupby('campaign_name')['action_budget_change'].transform(lambda x: x.shift(-1).fillna(0))
-    #df['reward_profit'] = df['revenue'] - df['spend']
+    df['reward_profit'] = df['revenue'] - df['spend']
 
     # Convert adset_datetime to numerical timestamp integer in nanoseconds
     #df['adset_datetime'] = pd.to_datetime(df['adset_datetime'].astype(str).str[:-2], format='%Y-%m-%d %H:%M:%S')
@@ -157,6 +158,7 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, description_pat
     #Compute additional metrics
     df['CTR'] = df['ay_sessions'] / df['impressions']
     df['CPM'] = df['spend'] / df['impressions']
+    df['CPR'] = df['spend'] / df['hourly_conversions']
     df['RPS'] = df['revenue'] / df['ay_sessions']
 
     #Replace all inf and NaN with 0
@@ -186,22 +188,8 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, description_pat
     df['ay_sessions'] = np.log10(df['ay_sessions']+1) / 10
     df['ay_pageviews'] = np.log10(df['ay_pageviews']+1) / 10
     df['hourly_conversions'] = np.log10(df['hourly_conversions']+1) / 10
+    df['cum_conversions'] = np.log10(df['cum_conversions']+1) / 10
     df['reward_profit'] = df['revenue'] - df['spend']
-
-    #Normalise the above columns
-    df['CTR'] = (df['CTR'] - df['CTR'].mean()) / df['CTR'].std()
-    df['CPM'] = (df['CPM'] - df['CPM'].mean()) / df['CPM'].std()
-    df['RPS'] = (df['RPS'] - df['RPS'].mean()) / df['RPS'].std()
-
-    #create a violin plot of the above metrics
-    if display_variables:
-        plt.figure(figsize=(10, 6))
-        sns.violinplot(data=df[['budget', 'action_budget_change', 'reward_profit', 'revenue', 'spend', 'impressions', 'ay_sessions', 'ay_pageviews', 'hourly_conversions', 'CTR', 'CPM', 'RPS']])
-        plt.xlabel('Metrics')
-        plt.ylabel('Values')
-        plt.ylim(-2,2)
-        plt.title('Violin Plot of Metrics')
-        plt.show()
 
     #Ensure all categorical columns are present, creating them if not
     for col in ['event_RPS3', 'event_RPS5', 'event_RPS8', 'country_-US', 'country_-CA', 'domain_-EK', 'domain_-GS', 'domain_-SM', 'domain_-HH', 'device_-AND']:
@@ -221,9 +209,8 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, description_pat
         'domain_-HH': 'first',
         'device_-AND': 'first',
         'active': 'first',
-        'budget': 'mean',
-        'action_budget_change': 'mean',
-        'reward_profit': 'sum',
+        'budget': 'first',
+        'cum_conversions': 'sum',
         'revenue': 'sum', 
         'spend': 'sum', 
         'impressions': 'sum', 
@@ -232,17 +219,36 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, description_pat
         'hourly_conversions': 'sum',
         'CTR': 'mean',
         'CPM': 'mean',
+        'CPR': 'mean',
         'RPS': 'mean',
         'hour_cos': 'mean',
         'hour_sin': 'mean',
         'day_cos': 'mean',
         'day_sin': 'mean',
         'month_cos': 'mean',
-        'month_sin': 'mean'
+        'month_sin': 'mean',
+        'action_budget_change': 'mean',
+        'reward_profit': 'sum'
     }
-
+    
     #Save the data.describe to a csv for normalisation constants
-    df.describe().to_csv('data/'+description_path+'.csv')
+    #df.describe().to_csv('data/'+description_path+'.csv')
+    data_describe = pd.read_csv('data/data_describe_dec-jan.csv', index_col=0)
+
+    for col in ['budget', 'cum_conversions', 'revenue', 'spend', 'impressions', 'ay_sessions', 'ay_pageviews', 'hourly_conversions', 'CTR', 'CPM', 'CPR', 'RPS']:
+        #Standardise the variables using the described data
+        df[col] = (df[col] - data_describe.loc['mean', col]) / data_describe.loc['std', col]
+
+    #create a violin plot of the above metrics
+    if display_variables:
+        plt.figure(figsize=(10, 6))
+        sns.violinplot(data=df[['budget', 'action_budget_change', 'reward_profit', 'revenue', 'spend', 'impressions', 'ay_sessions', 'ay_pageviews', 'hourly_conversions', 'CTR', 'CPM', 'RPS', 'CPR', 'cum_conversions']])
+        plt.xlabel('Metrics')
+        plt.xticks(rotation=90)
+        plt.ylabel('Values')
+        plt.ylim(-2,2)
+        plt.title('Violin Plot of Metrics')
+        plt.show()
     
     #Group by campaign_name and adset_datetime and aggregate the above metrics
     df = df.groupby(['campaign_name','adset_datetime']).agg(agg_dict).reset_index()
@@ -303,7 +309,7 @@ def create_trajectories_file(hourly_data, conversions_data, savepath_id='1', seq
     """
     #data = pd.read_csv('ash_0712-2901__.csv', index_col=0)
     #data = pd.read_csv('data/ash_0712-2901__.csv', index_col=0)
-    data = prep_data(hourly_data, conversions_data, display_variables=True)
+    data = prep_data(hourly_data, conversions_data, display_variables=True, description_path=savepath_id)
     
     state_columns = [col for col in data.columns if col not in ('Unnamed: 0', 'campaign_name', 'adset_datetime', 'action_budget_change', 'reward_profit')]
     action_column = 'action_budget_change'
