@@ -182,14 +182,14 @@ def prep_data(df, cdf, conversions_savepath=None, savepath=None, description_pat
 
     #log transform the numerical features and scale by 10 to bring into range 0,1 (No variables should be greater than ~10^5)
     df['budget'] = np.log10(df['budget']/100+1) / 10
-    df['revenue'] = np.log10(df['revenue']+1) / 10
-    df['spend'] = np.log10(df['spend']+1) / 10
-    df['impressions'] = np.log10(df['impressions']+1) / 10
-    df['ay_sessions'] = np.log10(df['ay_sessions']+1) / 10
-    df['ay_pageviews'] = np.log10(df['ay_pageviews']+1) / 10
-    df['hourly_conversions'] = np.log10(df['hourly_conversions']+1) / 10
-    df['cum_conversions'] = np.log10(df['cum_conversions']+1) / 10
-    df['reward_profit'] = df['revenue'] - df['spend']
+    df['revenue'] = np.log10(df['revenue']+0.1) / 10
+    df['spend'] = np.log10(df['spend']+0.1) / 10
+    df['impressions'] = np.log10(df['impressions']+0.1) / 10
+    df['ay_sessions'] = np.log10(df['ay_sessions']+0.1) / 10
+    df['ay_pageviews'] = np.log10(df['ay_pageviews']+0.1) / 10
+    df['hourly_conversions'] = np.log10(df['hourly_conversions']+0.1) / 10
+    df['cum_conversions'] = np.log10(df['cum_conversions']+0.1) / 10
+    df['reward_profit'] = np.sign(df['reward_profit'])*np.log10(abs(df['reward_profit'])+0.1) / 10
 
     #Ensure all categorical columns are present, creating them if not
     for col in ['event_RPS3', 'event_RPS5', 'event_RPS8', 'country_-US', 'country_-CA', 'domain_-EK', 'domain_-GS', 'domain_-SM', 'domain_-HH', 'device_-AND']:

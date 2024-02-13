@@ -95,6 +95,6 @@ if evaluation_mode:
     train_loader = DataLoader(TensorDataset(states, actions, rewards, returns_to_go, timesteps, attention_mask), batch_size=1, shuffle=False)
 
     #Evaluate the model
-    state, action, reward = utilities.evaluate_trajectory_transformer(model, train_loader, target_return = -2)
+    state, action, reward = utilities.evaluate_trajectory_transformer(model, train_loader, target_return = 2)
 
     print(state, action, reward)
